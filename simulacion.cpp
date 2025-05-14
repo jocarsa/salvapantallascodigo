@@ -142,9 +142,9 @@ int main() {
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
-    // Statistics print interval in seconds
-    int stats_interval = 10; // Print statistics every 10 seconds
-    int last_stats_time = 0;
+    // Statistics print interval in frames
+    int stats_interval = 10 * fps; // Print statistics every 10 seconds
+    int last_stats_frames = 0;
 
     // Main loop
     while (frames_written < total_frames) {
@@ -172,8 +172,9 @@ int main() {
         video.write(frame);
         frames_written++;
 
-        // Print statistics every X seconds
-        if (frames_written % (stats_interval * fps) == 0) {
+        // Print statistics every X frames
+        if (frames_written - last_stats_frames >= stats_interval) {
+            last_stats_frames = frames_written;
             int percentage_complete = (frames_written * 100 / total_frames);
             int remaining_time = (total_frames - frames_written) / fps;
             std::cout << "Frames Written: " << frames_written << " / "
@@ -182,7 +183,7 @@ int main() {
         }
 
         // Control the frame rate
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000 / fps));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(1000 / fps));
     }
 
     // Release the video writer
