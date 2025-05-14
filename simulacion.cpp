@@ -130,9 +130,9 @@ int main() {
     // Initialize a frame
     cv::Mat frame(height, width, CV_8UC3, background_color);
 
-    // Max time for animation in seconds
-    int max_time = 3600; // 1 hour
-    auto start_time = std::chrono::steady_clock::now();
+    // Total number of frames needed for 3600 seconds at given FPS
+    int total_frames = 3600 * fps;
+    int frames_written = 0;
 
     // List to keep track of active windows
     std::vector<Window> active_windows;
@@ -147,15 +147,7 @@ int main() {
     int last_stats_time = 0;
 
     // Main loop
-    while (true) {
-        // Calculate elapsed time
-        auto current_time = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
-
-        if (elapsed >= max_time) {
-            break;  // Exit after max_time seconds
-        }
-
+    while (frames_written < total_frames) {
         // Reset frame to background color
         frame = cv::Scalar(background_color);
 
@@ -178,13 +170,13 @@ int main() {
 
         // Write the frame to the video
         video.write(frame);
+        frames_written++;
 
         // Print statistics every X seconds
-        if (elapsed - last_stats_time >= stats_interval) {
-            last_stats_time = elapsed;
-            int percentage_complete = (elapsed * 100 / max_time);
-            int remaining_time = max_time - elapsed;
-            std::cout << "Time Passed: " << elapsed << " seconds / "
+        if (frames_written % (stats_interval * fps) == 0) {
+            int percentage_complete = (frames_written * 100 / total_frames);
+            int remaining_time = (total_frames - frames_written) / fps;
+            std::cout << "Frames Written: " << frames_written << " / "
                       << "Percentage Complete: " << percentage_complete << "% / "
                       << "Estimated Time to Finish: " << remaining_time << " seconds" << std::endl;
         }
