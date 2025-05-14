@@ -1,3 +1,4 @@
+// main.cpp
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <fstream>
@@ -6,7 +7,8 @@
 #include <ctime>
 #include <random>
 #include <chrono>
-#include <thread>
+#include <omp.h>            // OpenMP
+// #include <thread>        // no longer needed for sleep
 
 class Window {
 private:
@@ -22,174 +24,150 @@ public:
     void draw(cv::Mat& frame) {
         // Create a semi-transparent overlay for the window
         cv::Mat overlay = frame.clone();
-        cv::rectangle(overlay, cv::Rect(x, y, w, h), cv::Scalar(0, 0, 0), -1);
-
-        // Apply the overlay with transparency
+        cv::rectangle(overlay, cv::Rect(x, y, w, h), cv::Scalar(0,0,0), -1);
         double alpha = 0.5;
         cv::addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, frame);
 
-        // Draw the rectangle border with a thicker top bar
-        cv::rectangle(frame, cv::Rect(x, y, w, 30), cv::Scalar(255, 255, 255), -1); // Top bar
-        cv::rectangle(frame, cv::Rect(x, y + 30, w, h - 30), cv::Scalar(255, 255, 255), 2); // Rest of the border
+        // Draw borders
+        cv::rectangle(frame, cv::Rect(x, y, w, 30), cv::Scalar(255,255,255), -1);
+        cv::rectangle(frame, cv::Rect(x, y+30, w, h-30), cv::Scalar(255,255,255), 2);
 
-        // Constants for text rendering
+        // Text parameters
         int line_spacing = 30;
         int left_margin = 40;
-        int top_margin = 60;
-        cv::Scalar text_color(0, 255, 0); // Green
+        int top_margin  = 60;
+        cv::Scalar text_color(0,255,0);
 
-        // Draw the code lines with scrolling and padding
-        int y_pos = y + top_margin - scroll_offset;
-        for (int i = 0; i < current_line && i < code_lines.size(); ++i) {
+        // Render visible lines
+        int y_pos0 = y + top_margin - scroll_offset;
+        for (int i = 0; i < current_line && i < (int)code_lines.size(); ++i) {
             std::string line = code_lines[i];
-            // Remove trailing newlines, carriage returns, and question marks
-            if (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == '?')) {
+            if (!line.empty() && (line.back()=='\n' || line.back()=='\r' || line.back()=='?'))
                 line.pop_back();
-            }
 
-            if (y + top_margin <= y_pos + i * line_spacing && y_pos + i * line_spacing < y + h - line_spacing) {
-                cv::putText(frame, line, cv::Point(x + left_margin, y_pos + i * line_spacing),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2, cv::LINE_AA);
+            int yy = y_pos0 + i*line_spacing;
+            if (yy >= y + top_margin && yy < y + h - line_spacing) {
+                cv::putText(frame, line, cv::Point(x + left_margin, yy),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2, cv::LINE_AA);
             }
         }
     }
 
     void update() {
-        if (current_line < code_lines.size()) {
+        if (current_line < (int)code_lines.size())
             current_line++;
-        }
 
-        // Check if scrolling is needed
+        // Scroll if overflow
         int line_spacing = 30;
         int top_margin = 60;
-        if ((current_line * line_spacing) > (h - top_margin)) {
+        if (current_line * line_spacing > h - top_margin)
             scroll_offset += line_spacing;
-        }
 
-        // Ensure scroll_offset does not exceed the maximum possible offset
         int max_offset = current_line * line_spacing - (h - top_margin);
-        if (scroll_offset > max_offset && max_offset > 0) {
+        if (scroll_offset > max_offset && max_offset > 0)
             scroll_offset = max_offset;
-        }
     }
 };
 
 Window createRandomWindow(int width, int height, const std::vector<std::string>& code_lines) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
+    static thread_local std::mt19937 gen{std::random_device{}()};
     std::uniform_int_distribution<> w_dist(600, width - 100);
     std::uniform_int_distribution<> h_dist(600, height - 100);
-
-    int w = w_dist(gen);
-    int h = h_dist(gen);
+    int w = w_dist(gen), h = h_dist(gen);
 
     std::uniform_int_distribution<> x_dist(0, width - w - 1);
     std::uniform_int_distribution<> y_dist(0, height - h - 1);
-
-    int x = x_dist(gen);
-    int y = y_dist(gen);
+    int x = x_dist(gen), y = y_dist(gen);
 
     return Window(x, y, w, h, code_lines);
 }
 
 int main() {
-    // File path
+    // Read code from file
     std::string file_path = "codigo.cpp";
-
-    // Read the C++ code from the file
     std::ifstream file(file_path);
     if (!file.is_open()) {
         std::cerr << "Could not open file: " << file_path << std::endl;
         return 1;
     }
-
     std::vector<std::string> code_lines;
-    std::string line;
-    while (std::getline(file, line)) {
+    for (std::string line; std::getline(file, line); )
         code_lines.push_back(line);
-    }
     file.close();
 
     // Video settings
-    int width = 3840;  // 4K width
-    int height = 2160; // 4K height
-    int fps = 10;
-    cv::Scalar background_color(0, 0, 0); // Black
+    const int width  = 3840;
+    const int height = 2160;
+    const int fps    = 10;
+    cv::Scalar background_color(0,0,0);
 
-    // Create a video writer object with epoch timestamp
+    // Output file with timestamp
     std::time_t epoch_time = std::time(nullptr);
     std::string output_file = "output_" + std::to_string(epoch_time) + ".mp4";
-
-    cv::VideoWriter video(output_file, cv::VideoWriter::fourcc('m', 'p', '4', 'v'), fps, cv::Size(width, height));
+    cv::VideoWriter video(output_file,
+                          cv::VideoWriter::fourcc('m','p','4','v'),
+                          fps, cv::Size(width,height));
     if (!video.isOpened()) {
         std::cerr << "Could not open the output video file for writing" << std::endl;
         return 1;
     }
 
-    // Initialize a frame
+    // Frame buffer
     cv::Mat frame(height, width, CV_8UC3, background_color);
 
-    // Total number of frames needed for 3600 seconds at given FPS
-    int total_frames = 3600 * fps;
-    int frames_written = 0;
+    int total_frames    = 3600 * fps;
+    int frames_written  = 0;
+    int stats_interval  = 10 * fps;
+    int last_stats_frame= 0;
 
-    // List to keep track of active windows
     std::vector<Window> active_windows;
-
-    // Random number generator
-    std::random_device rd;
-    std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.0, 1.0);
+    std::mt19937 gen(std::random_device{}());
 
-    // Statistics print interval in frames
-    int stats_interval = 10 * fps; // Print statistics every 10 seconds
-    int last_stats_frames = 0;
+    // Setup OpenMP
+    omp_set_num_threads( omp_get_max_threads() );
 
-    // Main loop
+    // Main render loop
     while (frames_written < total_frames) {
-        // Reset frame to background color
-        frame = cv::Scalar(background_color);
+        // Clear frame
+        frame = background_color;
 
-        // Randomly create new windows with reduced probability
-        if (dis(gen) < 0.02) {  // Reduced probability
+        // Maybe spawn a new window
+        if (dis(gen) < 0.02)
             active_windows.push_back(createRandomWindow(width, height, code_lines));
+
+        // Parallel update
+        #pragma omp parallel for schedule(dynamic)
+        for (int i = 0; i < (int)active_windows.size(); ++i)
+            active_windows[i].update();
+
+        // Parallel draw with critical section
+        #pragma omp parallel for schedule(dynamic)
+        for (int i = 0; i < (int)active_windows.size(); ++i) {
+            #pragma omp critical
+            active_windows[i].draw(frame);
         }
 
-        // Update and draw active windows
-        for (auto& window : active_windows) {
-            window.update();
-            window.draw(frame);
-        }
-
-        // Randomly close windows
-        if (!active_windows.empty() && dis(gen) < 0.01) {  // Reduced probability
-            std::uniform_int_distribution<> wind_dist(0, active_windows.size() - 1);
+        // Maybe close a window
+        if (!active_windows.empty() && dis(gen) < 0.01) {
+            std::uniform_int_distribution<> wind_dist(0, (int)active_windows.size() - 1);
             active_windows.erase(active_windows.begin() + wind_dist(gen));
         }
 
-        // Write the frame to the video
+        // Write and stats
         video.write(frame);
         frames_written++;
-
-        // Print statistics every X frames
-        if (frames_written - last_stats_frames >= stats_interval) {
-            last_stats_frames = frames_written;
-            int percentage_complete = (frames_written * 100 / total_frames);
-            int remaining_time = (total_frames - frames_written) / fps;
-            std::cout << "Frames Written: " << frames_written << " / "
-                      << "Percentage Complete: " << percentage_complete << "% / "
-                      << "Estimated Time to Finish: " << remaining_time << " seconds" << std::endl;
+        if (frames_written - last_stats_frame >= stats_interval) {
+            last_stats_frame = frames_written;
+            int pct = frames_written * 100 / total_frames;
+            int rem = (total_frames - frames_written) / fps;
+            std::cout << "Frames: " << frames_written
+                      << " (" << pct << "%) / Remaining video seconds: "
+                      << rem << "s\n";
         }
-
-        // Control the frame rate
-        // std::this_thread::sleep_for(std::chrono::milliseconds(1000 / fps));
     }
 
-    // Release the video writer
     video.release();
-
-    std::cout << "Video saved as " << output_file << std::endl;
+    std::cout << "Saved to " << output_file << std::endl;
     return 0;
 }
-

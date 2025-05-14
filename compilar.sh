@@ -1,33 +1,17 @@
-#!/bin/bash
-
-# Exit on any error
+#!/usr/bin/env bash
 set -e
 
-echo "Compiling simulacion.cpp with OpenCV..."
+# Try to locate OpenCV 4
+PKG_CFLAGS=$(pkg-config --cflags opencv4)
+PKG_LDFLAGS=$(pkg-config --libs   opencv4)
 
-# Try to determine the OpenCV version
-if pkg-config --exists opencv4; then
-    echo "Found OpenCV 4.x"
-    OPENCV_FLAGS=$(pkg-config --cflags --libs opencv4)
-elif pkg-config --exists opencv; then
-    echo "Found OpenCV (legacy version)"
-    OPENCV_FLAGS=$(pkg-config --cflags --libs opencv)
-else
-    echo "Error: OpenCV not found. Please install OpenCV."
-    exit 1
+if [ -z "$PKG_CFLAGS$PKG_LDFLAGS" ]; then
+  echo "Error: pkg-config could not find opencv4."
+  echo "Make sure libopencv-dev is installed and PKG_CONFIG_PATH is correct."
+  exit 1
 fi
 
-# Compile the code
-g++ -std=c++11 -O3 simulacion.cpp -o matrix_simulator $OPENCV_FLAGS
+# Compile simulacion.cpp with OpenMP and OpenCV
+g++ $PKG_CFLAGS -std=c++17 -fopenmp simulacion.cpp -o simulacion $PKG_LDFLAGS
 
-# Check if compilation was successful
-if [ $? -eq 0 ]; then
-    echo "Compilation successful! Executable created: matrix_simulator"
-    echo "You can run it with: ./matrix_simulator"
-    
-    # Make the executable file runnable
-    chmod +x matrix_simulator
-else
-    echo "Compilation failed."
-    exit 1
-fi
+echo "Build complete: ./simulacion"
