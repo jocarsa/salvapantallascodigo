@@ -1,4 +1,3 @@
-// main.cpp
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <fstream>
@@ -7,9 +6,9 @@
 #include <ctime>
 #include <random>
 #include <chrono>
-#include <omp.h>            // OpenMP
-// #include <thread>        // no longer needed for sleep
+#include <list>
 
+// Window class definition remains the same
 class Window {
 private:
     int x, y, w, h;
@@ -120,12 +119,11 @@ int main() {
     int stats_interval  = 10 * fps;
     int last_stats_frame= 0;
 
-    std::vector<Window> active_windows;
+    std::list<Window> active_windows;
     std::uniform_real_distribution<> dis(0.0, 1.0);
     std::mt19937 gen(std::random_device{}());
 
-    // Setup OpenMP
-    omp_set_num_threads( omp_get_max_threads() );
+    auto start_time = std::chrono::steady_clock::now();
 
     // Main render loop
     while (frames_written < total_frames) {
@@ -136,22 +134,18 @@ int main() {
         if (dis(gen) < 0.02)
             active_windows.push_back(createRandomWindow(width, height, code_lines));
 
-        // Parallel update
-        #pragma omp parallel for schedule(dynamic)
-        for (int i = 0; i < (int)active_windows.size(); ++i)
-            active_windows[i].update();
+        // Update and draw windows
+        for (auto& window : active_windows)
+            window.update();
 
-        // Parallel draw with critical section
-        #pragma omp parallel for schedule(dynamic)
-        for (int i = 0; i < (int)active_windows.size(); ++i) {
-            #pragma omp critical
-            active_windows[i].draw(frame);
-        }
+        for (auto& window : active_windows)
+            window.draw(frame);
 
         // Maybe close a window
         if (!active_windows.empty() && dis(gen) < 0.01) {
-            std::uniform_int_distribution<> wind_dist(0, (int)active_windows.size() - 1);
-            active_windows.erase(active_windows.begin() + wind_dist(gen));
+            auto it = active_windows.begin();
+            std::advance(it, std::uniform_int_distribution<>(0, active_windows.size() - 1)(gen));
+            active_windows.erase(it);
         }
 
         // Write and stats
@@ -159,11 +153,18 @@ int main() {
         frames_written++;
         if (frames_written - last_stats_frame >= stats_interval) {
             last_stats_frame = frames_written;
-            int pct = frames_written * 100 / total_frames;
+            double pct = (frames_written * 100.0) / total_frames;
             int rem = (total_frames - frames_written) / fps;
+
+            auto current_time = std::chrono::steady_clock::now();
+            auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+            int estimated_total_time = (pct > 0) ? static_cast<int>((elapsed_time * 100.0) / pct) : 0;
+            int estimated_remaining_time = (pct > 0) ? estimated_total_time - elapsed_time : 0;
+
             std::cout << "Frames: " << frames_written
                       << " (" << pct << "%) / Remaining video seconds: "
-                      << rem << "s\n";
+                      << rem << "s / Estimated time remaining: "
+                      << estimated_remaining_time << "s\n";
         }
     }
 
