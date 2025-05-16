@@ -1,17 +1,18 @@
-#!/usr/bin/env bash
-set -e
+#!/bin/bash
 
-# Try to locate OpenCV 4
-PKG_CFLAGS=$(pkg-config --cflags opencv4)
-PKG_LDFLAGS=$(pkg-config --libs   opencv4)
+# Define the source file and output executable name
+SOURCE_FILE="simulacion.cpp"
+OUTPUT_EXECUTABLE="simulacion"
 
-if [ -z "$PKG_CFLAGS$PKG_LDFLAGS" ]; then
-  echo "Error: pkg-config could not find opencv4."
-  echo "Make sure libopencv-dev is installed and PKG_CONFIG_PATH is correct."
-  exit 1
+# Compile the code using g++
+g++ -std=c++11 $SOURCE_FILE -o $OUTPUT_EXECUTABLE \
+    `pkg-config --cflags --libs opencv4` \
+    -O2
+
+# Check if compilation was successful
+if [ $? -eq 0 ]; then
+    echo "Compilation successful. Executable created: $OUTPUT_EXECUTABLE"
+else
+    echo "Compilation failed."
 fi
 
-# Compile simulacion.cpp with OpenMP and OpenCV
-g++ $PKG_CFLAGS -std=c++17 -fopenmp simulacion.cpp -o simulacion $PKG_LDFLAGS
-
-echo "Build complete: ./simulacion"

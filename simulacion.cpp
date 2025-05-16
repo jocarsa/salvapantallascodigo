@@ -8,6 +8,7 @@
 #include <chrono>
 #include <list>
 #include <memory>
+#include <iomanip>
 
 // Window class with optimizations
 class Window {
@@ -32,7 +33,7 @@ public:
         // Add semi-transparent window to frame
         cv::Mat roi = frame(cv::Rect(x, y, w, h));
         double alpha = 0.5;
-        
+
         // Only apply the cached background
         cv::Mat overlay = roi.clone();
         cached_background.copyTo(overlay);
@@ -43,7 +44,7 @@ public:
         int left_margin = 40;
         int top_margin = 60;
         cv::Scalar text_color(0,255,0);
-        
+
         // Get font metrics to calculate text width
         int font_face = cv::FONT_HERSHEY_SIMPLEX;
         double font_scale = 0.7;
@@ -54,10 +55,10 @@ public:
         int visible_lines = (h - top_margin) / line_spacing;
         int start_line = scroll_offset / line_spacing;
         int end_line = std::min(current_line, start_line + visible_lines + 1);
-        
+
         // Calculate maximum available width for text
         int max_text_width = w - left_margin - right_margin;
-        
+
         // Further optimization - only render lines that are in the visible area
         for (int i = start_line; i < end_line && i < static_cast<int>(code_lines->size()); ++i) {
             std::string line = (*code_lines)[i];
@@ -70,36 +71,36 @@ public:
                 std::string display_text = line;
                 int baseline = 0;
                 cv::Size text_size = cv::getTextSize(display_text, font_face, font_scale, font_thickness, &baseline);
-                
+
                 // If text is too wide, crop it
                 if (text_size.width > max_text_width) {
                     // Binary search to find the maximum number of characters that fit
                     int left = 0;
                     int right = display_text.length();
                     std::string ellipsis = "...";
-                    
+
                     while (left < right) {
                         int mid = left + (right - left) / 2;
                         std::string test_text = display_text.substr(0, mid) + ellipsis;
                         cv::Size test_size = cv::getTextSize(test_text, font_face, font_scale, font_thickness, &baseline);
-                        
+
                         if (test_size.width <= max_text_width) {
                             left = mid + 1;
                         } else {
                             right = mid;
                         }
                     }
-                    
+
                     // Ensure we have at least some characters plus ellipsis
                     int max_chars = std::max(1, left - 1);
                     display_text = display_text.substr(0, max_chars) + ellipsis;
                 }
-                
+
                 cv::putText(frame, display_text, cv::Point(x + left_margin, yy),
                             font_face, font_scale, text_color, font_thickness, cv::LINE_AA);
             }
         }
-        
+
         needs_redraw = false;
     }
 
@@ -113,23 +114,23 @@ public:
             int top_margin = 60;
             if (current_line * line_spacing > h - top_margin) {
                 scroll_offset += line_spacing;
-                
+
                 int max_offset = current_line * line_spacing - (h - top_margin);
                 if (scroll_offset > max_offset && max_offset > 0)
                     scroll_offset = max_offset;
             }
-            
+
             return true; // Window is still active
         }
-        
+
         // Return false when window has displayed all content
         return current_line < static_cast<int>(code_lines->size());
     }
-    
+
     bool needsRedraw() const {
         return needs_redraw;
     }
-    
+
     bool isFinished() const {
         return current_line >= static_cast<int>(code_lines->size());
     }
@@ -137,7 +138,7 @@ public:
 
 Window createRandomWindow(int width, int height, std::shared_ptr<std::vector<std::string>> code_lines) {
     static thread_local std::mt19937 gen{std::random_device{}()};
-    
+
     // Constrain window sizes to be more reasonable
     std::uniform_int_distribution<> w_dist(400, std::min(800, width - 100));
     std::uniform_int_distribution<> h_dist(300, std::min(600, height - 100));
@@ -158,7 +159,7 @@ int main() {
         std::cerr << "Could not open file: " << file_path << std::endl;
         return 1;
     }
-    
+
     // Store code lines in a shared pointer to avoid copies
     auto code_lines = std::make_shared<std::vector<std::string>>();
     for (std::string line; std::getline(file, line); )
@@ -185,7 +186,7 @@ int main() {
     // Frame buffer
     cv::Mat frame(height, width, CV_8UC3, background_color);
 
-    int total_frames = 3600 * fps;  // 1 hour of video
+    int total_frames = 10 * 60 * 60 * fps;  // 10 hours of video
     int frames_written = 0;
     int stats_interval = 10 * fps;  // Show stats every 10 seconds
     int last_stats_frame = 0;
@@ -193,7 +194,7 @@ int main() {
     // Window management with maximum limit
     std::list<Window> active_windows;
     const size_t MAX_WINDOWS = 10;  // Limit maximum number of windows
-    
+
     std::uniform_real_distribution<> dis(0.0, 1.0);
     std::mt19937 gen(std::random_device{}());
 
@@ -231,7 +232,7 @@ int main() {
         // Write frame and update stats
         video.write(frame);
         frames_written++;
-        
+
         if (frames_written - last_stats_frame >= stats_interval) {
             last_stats_frame = frames_written;
             double pct = (frames_written * 100.0) / total_frames;
@@ -243,16 +244,22 @@ int main() {
             int estimated_total_time = (pct > 0) ? static_cast<int>((elapsed_time * 100.0) / pct) : 0;
             int estimated_remaining_time = (pct > 0) ? estimated_total_time - elapsed_time : 0;
 
-            std::cout << "Frames: " << frames_written
-                      << " (" << pct << "%) / Remaining video seconds: "
-                      << rem << "s / Estimated time remaining: "
-                      << estimated_remaining_time << "s"
+            // Convert remaining seconds to hours, minutes, and seconds
+            int hours = rem / 3600;
+            int minutes = (rem % 3600) / 60;
+            int seconds = rem % 60;
+
+            // Use carriage return to update the same line
+            std::cout << "\rFrames: " << frames_written
+                      << " (" << std::fixed << std::setprecision(2) << pct << "%) / Remaining video time: "
+                      << hours << "h " << minutes << "m " << seconds << "s"
                       << " / Active windows: " << active_windows.size()
-                      << " / Actual FPS: " << fps_actual << "\n";
+                      << " / Actual FPS: " << fps_actual << std::flush;
         }
     }
 
     video.release();
-    std::cout << "Saved to " << output_file << std::endl;
+    std::cout << "\nSaved to " << output_file << std::endl;
     return 0;
 }
+
